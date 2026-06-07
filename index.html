@@ -130,7 +130,7 @@
   <div class="head">
     <div>
       <div class="title">Cockpit <span>Assistant Personnel</span></div>
-      <div class="sub">Workflow Ishikawa hiérarchisé · Plans A/B · Répertoire · Onboarding — sauvegarde locale auto</div>
+      <div class="sub">Aujourd'hui · Domaines · Fishbone — journée générée, fiches par responsable & sensibilité <span style="color:var(--gold)">· v3.1</span></div>
     </div>
     <div class="tools">
       <button id="exp">Exporter</button>
@@ -182,13 +182,13 @@ const SECTIONS = [
     { label:"Périmètre du poste" },
     { label:"Modalités de reporting" } ]},
   { id:"calendrier", letter:"C", icon:"📅", label:"Agenda & calendrier", role:"AP", sens:"🟡 Restreint", items:[
-    { label:"Revue de l'agenda du jour", timing:"Confirmer J-1 (veille 18h) · tampon 30 min entre RDV", a:"Confirmer chaque RDV la veille + créneaux tampon", b:"Relancer sur 2 canaux, report pré-validé" },
-    { label:"Confirmation des participants", timing:"Relance J-1 si pas de réponse", a:"Confirmation écrite J-1", b:"Appel direct + assistant du tiers" },
+    { label:"Revue de l'agenda du jour", heure:"08:00", recur:"quotidien", timing:"Confirmer J-1 (veille 18h) · tampon 30 min entre RDV", a:"Confirmer chaque RDV la veille + créneaux tampon", b:"Relancer sur 2 canaux, report pré-validé" },
+    { label:"Confirmation des participants", heure:"08:15", recur:"ouvre", timing:"Relance J-1 si pas de réponse", a:"Confirmation écrite J-1", b:"Appel direct + assistant du tiers" },
     { label:"Gestion des conflits", a:"Arbitrer selon la matrice de priorité", b:"2 créneaux de report pré-acceptés" },
     { label:"Créneaux sacrés & priorités" },
-    { label:"Briefing matinal", timing:"Chaque matin avant 8h", a:"Synthèse en 5 points le matin", b:"Message vocal si en déplacement" } ]},
+    { label:"Briefing matinal", heure:"07:30", recur:"quotidien", timing:"Chaque matin avant 8h", a:"Synthèse en 5 points le matin", b:"Message vocal si en déplacement" } ]},
   { id:"comm", letter:"D", icon:"✉️", label:"Communications & gatekeeping", role:"AP", sens:"🟠 Confidentiel", items:[
-    { label:"Tri des emails", timing:"2×/jour (matin + fin d'après-midi)", a:"Classer Urgent/À traiter/Info", b:"Escalader au-delà du seuil" },
+    { label:"Tri des emails", heure:"09:00,17:00", recur:"ouvre", timing:"2×/jour (matin + fin d'après-midi)", a:"Classer Urgent/À traiter/Info", b:"Escalader au-delà du seuil" },
     { label:"Liste VIP (jamais filtrer)" },
     { label:"Filtrage appels & messages", a:"Router selon hiérarchie", b:"Message structuré + créneau de rappel" },
     { label:"Correspondance sortante", timing:"Réponse sous 24h", a:"Rédiger puis faire valider", b:"Modèles pré-approuvés" } ]},
@@ -205,7 +205,7 @@ const SECTIONS = [
     { label:"Entretien par zone", fields:[{k:"prest",l:"Prestataire"},{k:"freq",l:"Fréquence"}], timing:"Planifier ≥ 1 semaine à l'avance", a:"Prestataires planifiés", b:"Artisan d'urgence pré-référencé" },
     { label:"Fournisseurs & assurances", fields:[{k:"assur",l:"Assureur"},{k:"ech",l:"Échéance",t:"date"},{k:"contact",l:"Contact"}], role:"FO" } ]},
   { id:"staff", letter:"G", icon:"🧑‍🍳", label:"Personnel de maison", role:"HM", sens:"🟠 Confidentiel", items:[
-    { label:"Coordination du staff", a:"Planning diffusé + consignes", b:"Agence de remplacement à activer" },
+    { label:"Coordination du staff", heure:"08:45", recur:"ouvre", a:"Planning diffusé + consignes", b:"Agence de remplacement à activer" },
     { label:"Plannings & congés", timing:"Valider le planning chaque dimanche" },
     { label:"Remplacements", timing:"Prévenir l'agence ≥ 48h", a:"Remplaçant identifié", b:"Agence d'astreinte" },
     { label:"Contrats & rémunération", role:"FO", sens:"🔴 Secret" } ]},
@@ -387,16 +387,41 @@ function collectDeadlines(){
       out.push({sec:s,t,fd,date:v,days:Math.round((d-today)/86400000)}); }); }));
   out.sort((a,b)=>a.days-b.days); return out;
 }
+function recursToday(recur){ if(recur==="quotidien") return true; if(recur==="ouvre"){ const d=new Date().getDay(); return d>=1&&d<=5; } return false; }
+function buildDayPlan(){
+  const rows=[];
+  SECTIONS.forEach(s=>catTasks(s).forEach(t=>{ const st=ts(t.id);
+    const heure=st.heure||t.heure, recur=st.recur||t.recur;
+    if(heure && recursToday(recur)){
+      heure.split(",").map(x=>x.trim()).filter(Boolean).forEach(hh=>{
+        rows.push({time:hh, label:t.label, role:st.role||t.role, id:t.id, sec:s, kind:"task"}); });
+    }
+  }));
+  (state.agenda||[]).filter(e=>(e.start||"").slice(0,10)===todayISO()).forEach(e=>{
+    rows.push({time:fmtTime(e.start)||"–", label:e.title||"Événement", loc:e.location, kind:"event"}); });
+  rows.sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  return rows;
+}
 function renderToday(){
   const dateStr=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
   let h=`<div class="stitle">Aujourd'hui — ${esc(dateStr)}</div>
-    <p class="p">Ton cockpit du matin : l'agenda, les échéances qui approchent, et les points en repli. Clique une carte pour agir.</p>`;
-  const evs=(state.agenda||[]).filter(e=>(e.start||"").slice(0,10)===todayISO()).sort((a,b)=>(a.start||"").localeCompare(b.start||""));
-  h+=`<div class="today-sec"><div class="mlab">📆 Agenda du jour</div>`;
-  if(evs.length){ evs.forEach(e=>{ h+=`<div class="tcard"><span class="due" style="color:var(--gold);border:1px solid var(--gold)">${esc(fmtTime(e.start))}</span>
-      <div style="flex:1"><b>${esc(e.title||"Événement")}</b>${e.location?` <span style="color:var(--muted)">· ${esc(e.location)}</span>`:""}</div></div>`; });
-  } else { h+=`<div class="cap">Aucun événement chargé pour aujourd'hui. (Onglet Agent → Synchroniser l'agenda.)</div>`; }
+    <p class="p">Ta journée générée à partir des routines (heure + récurrence) et de l'agenda, puis les échéances qui approchent. Clique un bloc pour agir.</p>`;
+  // Timeline générée
+  const plan=buildDayPlan();
+  h+=`<div class="today-sec"><div class="mlab">🗓️ Ma journée (générée)</div>`;
+  if(plan.length){ plan.forEach(r=>{
+    if(r.kind==="event"){
+      h+=`<div class="tcard"><span class="due" style="color:var(--gold);border:1px solid var(--gold)">${esc(r.time)}</span>
+        <div style="flex:1"><b>${esc(r.label)}</b>${r.loc?` <span style="color:var(--muted)">· ${esc(r.loc)}</span>`:""} <span style="color:var(--muted);font-size:11px">· agenda</span></div></div>`;
+    } else { const c=roleColor(r.role);
+      h+=`<div class="tcard" data-menu="${esc(r.id)}"><span class="due" style="color:var(--text);border:1px solid var(--line)">${esc(r.time)}</span>
+        <div style="flex:1"><b>${esc(r.label)}</b> <span style="color:var(--muted);font-size:11px">· ${r.sec.letter}. ${esc(r.sec.label)}</span></div>
+        <span class="rolep" style="color:${c};border-color:${c}">${esc(r.role)}</span></div>`;
+    }
+  }); }
+  else { h+=`<div class="cap">Aucun bloc planifié aujourd'hui. Ouvre une tâche → renseigne <b>Heure(s)</b> + <b>Récurrence</b> pour qu'elle apparaisse ici, ou synchronise l'agenda (onglet Agent).</div>`; }
   h+=`</div>`;
+  // Échéances
   const dl=collectDeadlines().filter(x=>x.days<=90);
   h+=`<div class="today-sec"><div class="mlab">⏳ Échéances & rappels (90 jours)</div>`;
   if(dl.length){ dl.forEach(x=>{ const c=dueColor(x.days); const rl=ts(x.t.id).role||x.t.role;
@@ -405,6 +430,7 @@ function renderToday(){
       <span class="rolep" style="color:${roleColor(rl)};border-color:${roleColor(rl)}">${esc(rl)}</span></div>`; });
   } else { h+=`<div class="cap">Aucune échéance datée dans les 90 jours. Renseigne les dates dans les fiches (passeports, assurances, contrôles techniques…).</div>`; }
   h+=`</div>`;
+  // Plan B actifs
   const pb=[]; SECTIONS.forEach(s=>catTasks(s).forEach(t=>{ if(ts(t.id).active==="B") pb.push({s,t}); }));
   if(pb.length){ h+=`<div class="today-sec"><div class="mlab" style="color:var(--red)">⚠ En repli — Plan B actif</div>`;
     pb.forEach(x=>{ h+=`<div class="tcard" data-menu="${esc(x.t.id)}"><span class="due" style="color:var(--red);border:1px solid var(--red)">Plan B</span>
@@ -714,7 +740,7 @@ ov.addEventListener("click",e=>{ if(e.target===ov) closeMenu(); });
 
 function openTaskMenu(id){
   const f=findTask(id); if(!f) return;
-  const st=Object.assign({done:false,active:null,note:"",owner:"",role:f.t.role,sens:f.t.sens,timing:f.t.timing||"",fields:{}},ts(id));
+  const st=Object.assign({done:false,active:null,note:"",owner:"",role:f.t.role,sens:f.t.sens,timing:f.t.timing||"",fields:{},heure:f.t.heure||"",recur:f.t.recur||""},ts(id));
   const isAppt=["calendrier","voyages","famille","prestataires"].includes(f.sec.id);
   const isFiche = f.t.fields && f.t.fields.length;
   const owner=state.contacts.find(c=>c.id===st.owner);
@@ -765,6 +791,14 @@ function openTaskMenu(id){
     <textarea class="note" id="m_note" rows="2" placeholder="Détail / info…">${esc(st.note)}</textarea>
     <div class="mlab">Délai / timing (tampon)</div>
     <input class="note" id="m_timing" value="${esc(st.timing)}" placeholder="ex. Réserver ≥ 48h · annulation J-1"/>
+    <div class="mlab">Heure(s) — routine du jour (HH:MM)</div>
+    <input class="note" id="m_heure" value="${esc(st.heure)}" placeholder="ex. 07:30  ou  09:00,17:00"/>
+    <div class="mlab">Récurrence</div>
+    <select class="cell" id="m_recur">
+      <option value="" ${!st.recur?"selected":""}>Aucune</option>
+      <option value="quotidien" ${st.recur==='quotidien'?"selected":""}>Tous les jours</option>
+      <option value="ouvre" ${st.recur==='ouvre'?"selected":""}>Jours ouvrés (lun-ven)</option>
+    </select>
     ${act}
     ${f.t.custom?`<button class="mini" id="m_del" style="margin-top:14px;border-color:var(--red);color:var(--red)">Supprimer la tâche</button>`:""}
     <div class="cap" style="margin-top:14px">${state.team?"Mode équipe actif — diffusion vers le fichier commun (accès selon sensibilité).":"Active le mode équipe (onglet Agent) pour partager."}</div>
@@ -777,6 +811,8 @@ function openTaskMenu(id){
   const bb=document.getElementById("m_b"); if(bb) bb.onclick=()=>set({active:st.active==='B'?null:'B'});
   document.getElementById("m_note").addEventListener("input",e=>{ st.note=e.target.value; state.tasks[id]=st; save(); });
   document.getElementById("m_timing").addEventListener("input",e=>{ st.timing=e.target.value; state.tasks[id]=st; save(); });
+  document.getElementById("m_heure").addEventListener("input",e=>{ st.heure=e.target.value; state.tasks[id]=st; save(); });
+  document.getElementById("m_recur").onchange=e=>set({recur:e.target.value});
   if(isFiche) f.t.fields.forEach(fd=>{ const el=document.getElementById("fld_"+fd.k); if(el) el.addEventListener("input",e=>{ st.fields=st.fields||{}; st.fields[fd.k]=e.target.value; state.tasks[id]=st; save(); }); });
   document.getElementById("m_role").onchange=e=>set({role:e.target.value});
   document.getElementById("m_owner").onchange=e=>set({owner:e.target.value});
